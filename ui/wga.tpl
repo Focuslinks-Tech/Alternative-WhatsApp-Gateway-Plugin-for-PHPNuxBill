@@ -285,29 +285,33 @@
             <h5><i class="glyphicon glyphicon-cloud"></i> <strong>Method 1: Docker (Recommended)</strong></h5>
             <pre style="background: #2d2d2d; color: #f8f8f2; padding: 15px; border-radius: 5px; overflow-x: auto;">
 <span style="color: #75715e;"># Pull and run the Docker image</span>
-docker run -d \
-  --name whatsapp-server \
-  --restart unless-stopped \
-  -p 3000:3000 \
-  -v $(pwd)/whatsapp-data:/app/storages \
-  aldinokemal/go-whatsapp-web-multidevice:latest</pre>
+ docker run --detach --publish=3000:3000 --name=whatsapp --restart=always --volume=$(docker volume create
+--name=whatsapp):/app/storages aldinokemal2104/go-whatsapp-web-multidevice --autoreply="Dont't reply this message
+please"
+</pre>
 
             <h5><i class="glyphicon glyphicon-download-alt"></i> <strong>Method 2: Docker Compose</strong></h5>
             <p>Create a <code>docker-compose.yml</code> file:</p>
             <pre style="background: #2d2d2d; color: #f8f8f2; padding: 15px; border-radius: 5px; overflow-x: auto;">
-version: '3.8'
 services:
   whatsapp:
-    image: aldinokemal/go-whatsapp-web-multidevice:latest
-    container_name: whatsapp-server
-    restart: unless-stopped
+    image: aldinokemal2104/go-whatsapp-web-multidevice
+    container_name: whatsapp
+    restart: always
     ports:
       - "3000:3000"
     volumes:
-      - ./whatsapp-data:/app/storages
-    environment:
-      - APP_DEBUG=false
-      - APP_PORT=3000</pre>
+      - whatsapp:/app/storages
+    command:
+      - --basic-auth=admin:admin
+      - --port=3000
+      - --debug=true
+      - --os=Chrome
+      - --account-validation=false
+
+volumes:
+  whatsapp:
+</pre>
             <p>Then run: <code>docker-compose up -d</code></p>
 
             <h5><i class="glyphicon glyphicon-cog"></i> <strong>Method 3: Manual Installation (Go)</strong></h5>
