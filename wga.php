@@ -17,6 +17,87 @@
 register_menu("Alt WA Gateway", true, "wga_config", 'SETTINGS', '', '', "");
 register_hook('cronjob', 'wga_cron');
 
+// Debug mode flag - set to true only for development/troubleshooting
+define('WGA_DEBUG_MODE', false);
+
+/**
+ * Sanitize data for logging by redacting sensitive fields
+ * @param mixed $data Data to sanitize
+ * @return mixed Sanitized data
+ */
+function wga_sanitize_log_data($data)
+{
+    $sensitiveKeys = [
+        'password',
+        'passwd',
+        'pass',
+        'pwd',
+        'token',
+        'access_token',
+        'refresh_token',
+        'api_token',
+        'secret',
+        'api_key',
+        'apikey',
+        'api_secret',
+        'auth',
+        'authorization',
+        'credentials',
+        'session',
+        'session_id',
+        'sessionid',
+        'device_id',
+        'deviceid',
+        'device',
+        'phone',
+        'mobile',
+        'number',
+        'userpwd',
+        'user_pwd'
+    ];
+
+    if (is_array($data)) {
+        $sanitized = [];
+        foreach ($data as $key => $value) {
+            $keyLower = strtolower($key);
+            $isSensitive = false;
+            foreach ($sensitiveKeys as $sensitiveKey) {
+                if (strpos($keyLower, $sensitiveKey) !== false) {
+                    $isSensitive = true;
+                    break;
+                }
+            }
+            if ($isSensitive) {
+                $sanitized[$key] = '[REDACTED]';
+            } elseif (is_array($value) || is_object($value)) {
+                $sanitized[$key] = wga_sanitize_log_data($value);
+            } else {
+                $sanitized[$key] = $value;
+            }
+        }
+        return $sanitized;
+    } elseif (is_object($data)) {
+        return wga_sanitize_log_data((array) $data);
+    }
+    return $data;
+}
+
+/**
+ * Log message with optional debug data (sanitized)
+ * @param string $message Log message
+ * @param mixed $data Optional data to include (only in debug mode)
+ * @param bool $forceLog Force logging even if not in debug mode
+ */
+function wga_log($message, $data = null, $forceLog = false)
+{
+    if ($data !== null && (WGA_DEBUG_MODE || $forceLog)) {
+        $sanitized = wga_sanitize_log_data($data);
+        _log($message . ' ' . json_encode($sanitized));
+    } else {
+        _log($message);
+    }
+}
+
 function wga_config()
 {
     global $ui, $config;
@@ -325,8 +406,10 @@ class WGA
             ];
         }
 
-        // Log raw response for debugging
-        _log('WGA Raw Response (HTTP ' . $httpCode . '): ' . substr($response, 0, 500));
+        // Log raw response for debugging (only in debug mode, truncated)
+        if (WGA_DEBUG_MODE) {
+            _log('WGA Raw Response (HTTP ' . $httpCode . '): [truncated]');
+        }
 
         // Check if response is empty
         if (empty($response)) {
@@ -896,7 +979,7 @@ function wga_createDevice()
 
         // Create device on API server via POST /devices
         $result = $wga->addDevice($deviceId);
-        _log('WGA Create Device Result: ' . print_r($result, true));
+        wga_log('WGA Create Device: ' . ($result['success'] ? 'success' : 'failed'), $result);
 
         // Check if device was created
         if ($result['success']) {
@@ -922,19 +1005,15 @@ function wga_createDevice()
                 $newDeviceId = $deviceId;
             }
 
-            _log('WGA Device ID extraction - data: ' . json_encode($data) . ' - extracted: ' . $newDeviceId);
+            wga_log('WGA Device ID extraction: ' . ($newDeviceId ? 'found' : 'not found'), $data);
 
             if (empty($newDeviceId)) {
-                // Return full debug info
+                // Log detailed info server-side for troubleshooting
+                wga_log('WGA Device creation: no device_id in response', $data, true);
+                // Return generic error to client (no sensitive debug data)
                 echo json_encode([
                     'success' => false,
-                    'message' => 'Device created but no device_id returned. Response: ' . json_encode($data),
-                    'data' => $result['data'] ?? null,
-                    'debug' => [
-                        'results_id' => $data['results']['id'] ?? 'not found',
-                        'results' => $data['results'] ?? 'not found',
-                        'full_data' => $data
-                    ]
+                    'message' => 'Device created but no device_id returned. Please check server logs or try again.'
                 ]);
                 exit;
             }
@@ -1115,7 +1194,7 @@ function wga_getQrCode()
                     }
                     $qrBase64 = 'data:' . $mimeType . ';base64,' . base64_encode($imgData);
                 } else {
-                    _log('WGA QR Image Fetch Failed: HTTP ' . $imgCode . ' - ' . $curlError . ' - URL: ' . $qrLink);
+                    wga_log('WGA QR Image Fetch Failed: HTTP ' . $imgCode . ' - ' . $curlError);
                 }
             }
 
@@ -1185,7 +1264,7 @@ function wga_getPairingCode()
         $wga = new WGA($serverUrl, $apiKey, $wgaUsername, $wgaPassword);
         $result = $wga->getPairingCode($deviceId, $phone);
 
-        _log('WGA Pairing Code Response: ' . print_r($result, true));
+        wga_log('WGA Pairing Code: ' . ($result['success'] ? 'success' : 'failed'), $result);
 
         if ($result['success']) {
             // Extract pairing code from various possible response formats
@@ -1463,7 +1542,7 @@ function wga_getDevices()
         $wga = new WGA($serverUrl, $apiKey, $wgaUsername, $wgaPassword);
         $result = $wga->getDevices();
 
-        _log('WGA Get Devices Result: ' . print_r($result, true));
+        wga_log('WGA Get Devices: ' . ($result['success'] ? 'success' : 'failed') . ' - count: ' . (isset($result['data']['results']) ? count($result['data']['results']) : 0));
 
         if ($result['success']) {
             // Handle different response formats
@@ -1482,8 +1561,7 @@ function wga_getDevices()
             echo json_encode([
                 'success' => true,
                 'message' => 'Devices retrieved',
-                'data' => ['results' => $devices],
-                'raw' => $result['data'] // Include raw for debugging
+                'data' => ['results' => $devices]
             ]);
         } else {
             echo json_encode([

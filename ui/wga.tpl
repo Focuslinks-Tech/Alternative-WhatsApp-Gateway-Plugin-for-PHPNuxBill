@@ -159,15 +159,16 @@
                                     {if $devices && count($devices) > 0}
                                     {foreach $devices as $device}
                                     {assign var="deviceId" value=$device.id|default:$device.device}
-                                    <tr id="wga-device-row-{$deviceId}">
-                                        <td>{$device.display_name|default:$device.name|default:$deviceId}</td>
-                                        <td><small>{$deviceId}</small></td>
+                                    <tr id="wga-device-row-{$deviceId|escape:'htmlall'}">
+                                        <td>{$device.display_name|default:$device.name|default:$deviceId|escape:'htmlall'}
+                                        </td>
+                                        <td><small>{$deviceId|escape:'htmlall'}</small></td>
                                         <td>
                                             {assign var="deviceState"
                                             value=$device.state|default:$device.status|default:'disconnected'}
                                             <span
                                                 class="label {if $deviceState == 'connected' || $deviceState == 'online'}label-success{else}label-warning{/if}">
-                                                {$deviceState}
+                                                {$deviceState|escape:'htmlall'}
                                             </span>
                                         </td>
                                         <td>
@@ -176,22 +177,25 @@
                                                 <i class="glyphicon glyphicon-ok"></i> {Lang::T('Active')}
                                             </span>
                                             {else}
-                                            <button class="btn btn-success btn-xs"
-                                                onclick="wgaSetActiveDevice('{$deviceId}')"
+                                            <button class="btn btn-success btn-xs wga-set-active-btn"
+                                                data-device-id="{$deviceId|escape:'htmlall'}"
                                                 title="{Lang::T('Set as Active')}">
                                                 <i class="glyphicon glyphicon-ok"></i> {Lang::T('Set Active')}
                                             </button>
                                             {/if}
-                                            <button class="btn btn-info btn-xs" onclick="wgaReconnect('{$deviceId}')"
+                                            <button class="btn btn-info btn-xs wga-reconnect-btn"
+                                                data-device-id="{$deviceId|escape:'htmlall'}"
                                                 title="{Lang::T('Reconnect')}">
                                                 <i class="glyphicon glyphicon-refresh"></i>
                                             </button>
-                                            <button class="btn btn-warning btn-xs" onclick="wgaLogout('{$deviceId}')"
+                                            <button class="btn btn-warning btn-xs wga-logout-btn"
+                                                data-device-id="{$deviceId|escape:'htmlall'}"
                                                 title="{Lang::T('Logout')}">
                                                 <i class="glyphicon glyphicon-log-out"></i>
                                             </button>
-                                            <button class="btn btn-danger btn-xs"
-                                                onclick="wgaDeleteDevice('{$deviceId}')" title="{Lang::T('Delete')}">
+                                            <button class="btn btn-danger btn-xs wga-delete-btn"
+                                                data-device-id="{$deviceId|escape:'htmlall'}"
+                                                title="{Lang::T('Delete')}">
                                                 <i class="glyphicon glyphicon-trash"></i>
                                             </button>
                                         </td>
@@ -809,13 +813,26 @@ go build -o whatsapp-server
             .then(function (response) { return response.json(); })
             .then(function (data) {
                 if (data.success) {
-                    alert('Device deleted successfully');
-                    // If deleted device was active, clear the active device display
+                    // If deleted device was active, clear from server and UI
                     if (deviceId === wgaActiveDeviceId) {
                         wgaActiveDeviceId = '';
                         var displayEl = wgaGetEl('wga-active-device-display');
                         if (displayEl) displayEl.textContent = '';
+                        // Clear server-side saved active device
+                        var clearFormData = new FormData();
+                        clearFormData.append('device_id', '');
+                        fetch(wgaBaseUrl + 'plugin/wga_saveDeviceId', { method: 'POST', body: clearFormData })
+                            .then(function (response) { return response.json(); })
+                            .then(function (clearData) {
+                                if (!clearData.success) {
+                                    console.error('Failed to clear server-side active device:', clearData.message);
+                                }
+                            })
+                            .catch(function (error) {
+                                console.error('Error clearing server-side active device:', error);
+                            });
                     }
+                    alert('Device deleted successfully');
                     wgaRefreshDevices();
                 } else {
                     alert('Error: ' + (data.message || 'Failed to delete device'));
@@ -840,7 +857,15 @@ go build -o whatsapp-server
 
     // Render Devices Table
     // Current active device ID
-    var wgaActiveDeviceId = '{$_c['alt_wga_device_id']|default:''}';
+    var wgaActiveDeviceId = '{$_c['alt_wga_device_id']|escape:'javascript'|default:''}';
+
+    // HTML escape helper to prevent XSS
+    function wgaEscapeHtml(str) {
+        if (!str) return '';
+        var div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+    }
 
     function wgaRenderDevicesTable(devices) {
         var tbody = wgaGetEl('wga-devices-tbody');
@@ -856,26 +881,52 @@ go build -o whatsapp-server
             var status = device.state || device.status || 'disconnected';
             var statusClass = (status === 'connected' || status === 'online') ? 'label-success' : 'label-warning';
 
+            // Escape all values for safe HTML insertion
+            var safeDeviceId = wgaEscapeHtml(deviceId);
+            var safeDeviceName = wgaEscapeHtml(deviceName);
+            var safeStatus = wgaEscapeHtml(status);
+
             // Set Active button or Active label
             var activeBtn = '';
             if (deviceId === wgaActiveDeviceId) {
                 activeBtn = '<span class="label label-primary"><i class="glyphicon glyphicon-ok"></i> Active</span> ';
             } else {
-                activeBtn = '<button class="btn btn-success btn-xs" onclick="wgaSetActiveDevice(\'' + deviceId + '\')" title="Set as Active">' +
+                activeBtn = '<button class="btn btn-success btn-xs wga-set-active-btn" data-device-id="' + safeDeviceId + '" title="Set as Active">' +
                     '<i class="glyphicon glyphicon-ok"></i> Set Active</button> ';
             }
 
-            html += '<tr><td>' + deviceName + '</td><td><small>' + deviceId + '</small></td>' +
-                '<td><span class="label ' + statusClass + '">' + status + '</span></td><td>' +
+            html += '<tr><td>' + safeDeviceName + '</td><td><small>' + safeDeviceId + '</small></td>' +
+                '<td><span class="label ' + statusClass + '">' + safeStatus + '</span></td><td>' +
                 activeBtn +
-                '<button class="btn btn-info btn-xs" onclick="wgaReconnect(\'' + deviceId + '\')" title="Reconnect">' +
+                '<button class="btn btn-info btn-xs wga-reconnect-btn" data-device-id="' + safeDeviceId + '" title="Reconnect">' +
                 '<i class="glyphicon glyphicon-refresh"></i></button> ' +
-                '<button class="btn btn-warning btn-xs" onclick="wgaLogout(\'' + deviceId + '\')" title="Logout">' +
+                '<button class="btn btn-warning btn-xs wga-logout-btn" data-device-id="' + safeDeviceId + '" title="Logout">' +
                 '<i class="glyphicon glyphicon-log-out"></i></button> ' +
-                '<button class="btn btn-danger btn-xs" onclick="wgaDeleteDevice(\'' + deviceId + '\')" title="Delete">' +
+                '<button class="btn btn-danger btn-xs wga-delete-btn" data-device-id="' + safeDeviceId + '" title="Delete">' +
                 '<i class="glyphicon glyphicon-trash"></i></button></td></tr>';
         });
         tbody.innerHTML = html;
+    }
+
+    // Event delegation for device action buttons
+    var devicesContainer = wgaGetEl('wga-devices-tbody');
+    if (devicesContainer) {
+        devicesContainer.addEventListener('click', function (e) {
+            var target = e.target.closest('button');
+            if (!target) return;
+            var deviceId = target.dataset.deviceId;
+            if (!deviceId) return;
+
+            if (target.classList.contains('wga-set-active-btn')) {
+                wgaSetActiveDevice(deviceId);
+            } else if (target.classList.contains('wga-reconnect-btn')) {
+                wgaReconnect(deviceId);
+            } else if (target.classList.contains('wga-logout-btn')) {
+                wgaLogout(deviceId);
+            } else if (target.classList.contains('wga-delete-btn')) {
+                wgaDeleteDevice(deviceId);
+            }
+        });
     }
 
     // Set active device
