@@ -459,8 +459,7 @@ go build -o whatsapp-server
     document.addEventListener('DOMContentLoaded', function () {
         var wgaBaseUrl = '{$_url}';
         var wgaConnectionCheckInterval = null;
-        var wgaInitialDeviceCount = { if $devices }{ $devices| @count
-    }{ else}0{/if};
+        var wgaInitialDeviceCount = {if $devices}{$devices|@count}{else}0{/if};
 
     // Helper functions
     function wgaGetEl(id) { return document.getElementById(id); }
